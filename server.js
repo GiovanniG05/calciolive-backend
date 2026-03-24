@@ -32,10 +32,10 @@ function authMiddleware(req, res, next) {
 
 // ── REGISTER ────────────────────────────────────────────────────
 app.post('/api/auth/register', async (req, res) => {
-  const { email, password, username } = req.body;
+  const { email, password, username, nome, cognome, squadra_preferita } = req.body;
 
-  if (!email || !password || !username) {
-    return res.status(400).json({ error: 'Email, password e username sono obbligatori' });
+  if (!email || !password || !username || !nome || !cognome) {
+    return res.status(400).json({ error: 'Tutti i campi sono obbligatori' });
   }
   if (password.length < 6) {
     return res.status(400).json({ error: 'La password deve essere di almeno 6 caratteri' });
@@ -59,8 +59,8 @@ app.post('/api/auth/register', async (req, res) => {
     // Inserisci utente
     const { data: user, error } = await supabase
       .from('users')
-      .insert({ email, password_hash, username })
-      .select('id, email, username, created_at')
+      .insert({ email, password_hash, username, nome, cognome, squadra_preferita: squadra_preferita ?? '' })
+      .select('id, email, username, nome, cognome, squadra_preferita, created_at')
       .single();
 
     if (error) throw error;
@@ -90,7 +90,7 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { data: user, error } = await supabase
       .from('users')
-      .select('*')
+      .select('id, email, username, nome, cognome, squadra_preferita, password_hash, created_at')
       .eq('email', email)
       .single();
 
@@ -110,7 +110,7 @@ app.post('/api/auth/login', async (req, res) => {
     );
 
     res.json({
-      user: { id: user.id, email: user.email, username: user.username, created_at: user.created_at },
+      user: { id: user.id, email: user.email, username: user.username, nome: user.nome, cognome: user.cognome, squadra_preferita: user.squadra_preferita, created_at: user.created_at },
       token
     });
   } catch (err) {
@@ -124,7 +124,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   try {
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, email, username, created_at')
+      .select('id, email, username, nome, cognome, squadra_preferita, created_at')
       .eq('id', req.user.id)
       .single();
 
