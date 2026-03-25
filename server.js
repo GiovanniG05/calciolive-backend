@@ -256,6 +256,42 @@ app.put('/api/auth/password', authMiddleware, async (req, res) => {
   }
 });
 
+// ── PROXY FOOTBALL-DATA GENERALE ─────────────────────────────────
+app.get('/api/football', async (req, res) => {
+  try {
+    const path = req.query.path;
+    if (!path) return res.status(400).json({ error: 'path mancante' });
+    const url = new URL(`https://api.football-data.org/v4/${path}`);
+    // Aggiungi tutti gli altri query params tranne 'path'
+    Object.entries(req.query).forEach(([k, v]) => {
+      if (k !== 'path') url.searchParams.set(k, v);
+    });
+    const response = await fetch(url.toString(), {
+      headers: { 'X-Auth-Token': process.env.FOOTBALL_API_KEY }
+    });
+    if (!response.ok) return res.status(response.status).json({ error: 'Errore API' });
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Errore server' });
+  }
+});
+
+// ── PROXY TEAMS PER CAMPIONATO ────────────────────────────────────
+app.get('/api/teams/:competition', async (req, res) => {
+  try {
+    const response = await fetch(
+      `https://api.football-data.org/v4/competitions/${req.params.competition}/teams`,
+      { headers: { 'X-Auth-Token': process.env.FOOTBALL_API_KEY } }
+    );
+    if (!response.ok) return res.status(response.status).json({ error: 'Errore API' });
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Errore server' });
+  }
+});
+
 // ── HEALTH CHECK ─────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
