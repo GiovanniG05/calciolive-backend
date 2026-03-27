@@ -108,30 +108,7 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Credenziali non valide' });
     }
 
-    // TEMP: Skip 2FA for admin user during testing
-    if (user.role === 'admin') {
-      const token = jwt.sign(
-        { id: user.id, email: user.email, username: user.username, role: user.role },
-        process.env.JWT_SECRET,
-        { expiresIn: '7d' }
-      );
-      return res.json({
-        user: {
-          id: user.id,
-          email: user.email,
-          username: user.username,
-          nome: user.nome,
-          cognome: user.cognome,
-          squadra_preferita: user.squadra_preferita,
-          squadra_crest: user.squadra_crest,
-          role: user.role,
-          created_at: user.created_at
-        },
-        token
-      });
-    }
-
-    // Genera OTP per utenti normali
+    // Genera OTP per tutti gli utenti
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expires = Date.now() + 10 * 60 * 1000; // 10 minuti
     const tempToken = jwt.sign(
