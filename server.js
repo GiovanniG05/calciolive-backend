@@ -95,7 +95,7 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, email, username, nome, cognome, squadra_preferita, squadra_crest, password_hash, created_at')
+      .select('id, email, username, nome, cognome, squadra_preferita, squadra_crest, role, password_hash, created_at')
       .eq('email', email)
       .single();
 
@@ -108,15 +108,54 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Credenziali non valide' });
     }
 
-    // Genera OTP
+    // TEMP: Skip 2FA for admin user during testing
+    if (user.role === 'admin') {
+      const token = jwt.sign(
+        { id: user.id, email: user.email, username: user.username, role: user.role },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+      return res.json({
+        user: {
+          id: user.id,
+          email: user.email,
+          username: user.username,
+          nome: user.nome,
+          cognome: user.cognome,
+          squadra_preferita: user.squadra_preferita,
+          squadra_crest: user.squadra_crest,
+          role: user.role,
+          created_at: user.created_at
+        },
+        token
+      });
+    }
+
+    // Genera OTP per utenti normali
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expires = Date.now() + 10 * 60 * 1000; // 10 minuti
     const tempToken = jwt.sign(
-      { id: user.id, email: user.email, username: user.username },
+      { id: user.id, email: user.email, username: user.username, role: user.role ?? 'user' },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
-    otpStore.set(user.email, { code: otp, expires, userId: user.id, token: tempToken, userData: { id: user.id, email: user.email, username: user.username, nome: user.nome, cognome: user.cognome, squadra_preferita: user.squadra_preferita, squadra_crest: user.squadra_crest, created_at: user.created_at } });
+    otpStore.set(user.email, {
+      code: otp,
+      expires,
+      userId: user.id,
+      token: tempToken,
+      userData: {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        nome: user.nome,
+        cognome: user.cognome,
+        squadra_preferita: user.squadra_preferita,
+        squadra_crest: user.squadra_crest,
+        role: user.role ?? 'user',
+        created_at: user.created_at
+      }
+    });
 
     // Manda email OTP
     try {
@@ -166,7 +205,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   try {
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, email, username, nome, cognome, squadra_preferita, squadra_crest, created_at')
+      .select('id, email, username, nome, cognome, squadra_preferita, squadra_crest, role, created_at')
       .eq('id', req.user.id)
       .single();
 
@@ -332,6 +371,44 @@ app.get('/api/teams/:competition', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: 'Errore server' });
   }
+});
+
+// ── ADMIN MIDDLEWARE ──────────────────────────────────────────────
+function adminMiddleware(req, res, next) {
+  const token = req.headers.authorization?.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'Token mancante' });
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    if (decoded.role !== 'admin') return res.status(403).json({ error: 'Accesso negato' });
+    req.user = decoded;
+    next();
+  } catch {
+    res.status(401).json({ error: 'Token non valido' });
+  }
+}
+
+// ── ADMIN ROUTES ───────────────────────────────────────────────────
+app.get('/api/admin/users', adminMiddleware, async (req, res) => {
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, email, username, nome, cognome, squadra_preferita, squadra_crest, role, created_at')
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ error: 'Errore nel recupero utenti' });
+  res.json({ users: data });
+});
+
+app.put('/api/admin/users/:id/role', adminMiddleware, async (req, res) => {
+  const { role } = req.body;
+  if (!['user', 'admin'].includes(role)) return res.status(400).json({ error: 'Ruolo non valido' });
+  const { error } = await supabase.from('users').update({ role }).eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: 'Errore aggiornamento ruolo' });
+  res.json({ success: true });
+});
+
+app.delete('/api/admin/users/:id', adminMiddleware, async (req, res) => {
+  const { error } = await supabase.from('users').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ error: 'Errore eliminazione utente' });
+  res.json({ success: true });
 });
 
 // ── HEALTH CHECK ─────────────────────────────────────────────────
