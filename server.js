@@ -388,62 +388,6 @@ app.delete('/api/admin/users/:id', adminMiddleware, async (req, res) => {
   res.json({ success: true });
 });
 
-// ── MATCH EVENTS (gol + minuti) via api-football.com ─────────────
-const COMPETITION_TO_LEAGUE = {
-  'SA': 135, 'PL': 39, 'BL1': 78, 'PD': 140, 'FL1': 61, 'CL': 2,
-  'PPL': 94, 'DED': 88, 'BSA': 71, 'ELC': 40
-};
-
-app.get('/api/match-events', async (req, res) => {
-  const { date, home, away, season, competition } = req.query;
-  if (!date || !home || !away) return res.status(400).json({ error: 'Parametri mancanti' });
-
-  const leagueId = COMPETITION_TO_LEAGUE[competition] ?? 135;
-  const yr = new Date(date).getFullYear();
-  const seasonYear = new Date(date).getMonth() >= 6 ? yr : yr - 1;
-  const dateStr = date.split('T')[0];
-
-  try {
-    const fixturesRes = await fetch(
-      `https://v3.football.api-sports.io/fixtures?date=${dateStr}&league=${leagueId}&season=${season ?? seasonYear}`,
-      { headers: { 'x-apisports-key': process.env.API_FOOTBALL_KEY } }
-    );
-    const fixturesData = await fixturesRes.json();
-
-    const normalize = s => s.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const fixture = fixturesData.response?.find(f => {
-      const fh = normalize(f.teams.home.name);
-      const fa = normalize(f.teams.away.name);
-      const qh = normalize(home);
-      const qa = normalize(away);
-      return (fh.includes(qh) || qh.includes(fh)) && (fa.includes(qa) || qa.includes(fa));
-    });
-
-    if (!fixture) return res.status(404).json({ error: 'Partita non trovata', goals: [] });
-
-    const eventsRes = await fetch(
-      `https://v3.football.api-sports.io/fixtures/events?fixture=${fixture.fixture.id}&type=Goal`,
-      { headers: { 'x-apisports-key': process.env.API_FOOTBALL_KEY } }
-    );
-    const eventsData = await eventsRes.json();
-
-    const goals = (eventsData.response ?? []).map(e => ({
-      minute: e.time.elapsed,
-      injuryTime: e.time.extra,
-      scorer: { name: e.player.name },
-      team: { name: e.team.name, id: e.team.id },
-      type: e.detail === 'Own Goal' ? 'OWN_GOAL' : e.detail === 'Penalty' ? 'PENALTY' : 'NORMAL',
-      apiTeamId: e.team.id,
-      apiHomeId: fixture.teams.home.id,
-      apiAwayId: fixture.teams.away.id
-    }));
-
-    res.json({ goals });
-  } catch (err) {
-    console.error('Match events error:', err);
-    res.status(500).json({ error: 'Errore server', goals: [] });
-  }
-});
 
 // ── HEALTH CHECK ─────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
