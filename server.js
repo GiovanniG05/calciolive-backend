@@ -70,14 +70,35 @@ app.post('/api/auth/register', async (req, res) => {
 
     if (error) throw error;
 
-    // Genera token
+    // Genera OTP di verifica
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expires = Date.now() + 10 * 60 * 1000;
     const token = jwt.sign(
-      { id: user.id, email: user.email, username: user.username },
+      { id: user.id, email: user.email, username: user.username, role: 'user' },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
+    otpStore.set(user.email, { code: otp, expires, userId: user.id, token, userData: { id: user.id, email: user.email, username: user.username, nome: user.nome, cognome: user.cognome, squadra_preferita: user.squadra_preferita, squadra_crest: user.squadra_crest, role: 'user', created_at: user.created_at } });
 
-    res.status(201).json({ user, token });
+    try {
+      await resend.emails.send({
+        from: 'CalcioLive <noreply@resend.dev>',
+        to: user.email,
+        subject: 'Conferma la tua email - CalcioLive',
+        html: `
+          <div style="font-family:sans-serif;max-width:400px;margin:0 auto;padding:32px;background:#0d1117;border-radius:16px;color:white">
+            <h2 style="color:#4ade80;margin:0 0 8px">CalcioLive</h2>
+            <p style="color:rgba(255,255,255,.6);margin:0 0 24px">Benvenuto! Conferma la tua email con questo codice:</p>
+            <div style="font-size:2.5rem;font-weight:900;letter-spacing:8px;color:white;text-align:center;background:rgba(255,255,255,.08);padding:20px;border-radius:12px;margin-bottom:24px">${otp}</div>
+            <p style="color:rgba(255,255,255,.4);font-size:.85rem">Questo codice scade tra 10 minuti. Non condividerlo con nessuno.</p>
+          </div>
+        `
+      });
+    } catch (emailErr) {
+      console.error('Email error:', emailErr);
+    }
+
+    res.status(201).json({ requires_verification: true, email: user.email });
   } catch (err) {
     console.error('Register error:', err);
     res.status(500).json({ error: 'Errore durante la registrazione' });
