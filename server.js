@@ -108,7 +108,7 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Credenziali non valide' });
     }
 
-    // Genera OTP per tutti gli utenti
+    // Genera OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const expires = Date.now() + 10 * 60 * 1000; // 10 minuti
     const tempToken = jwt.sign(
@@ -116,23 +116,7 @@ app.post('/api/auth/login', async (req, res) => {
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
-    otpStore.set(user.email, {
-      code: otp,
-      expires,
-      userId: user.id,
-      token: tempToken,
-      userData: {
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        nome: user.nome,
-        cognome: user.cognome,
-        squadra_preferita: user.squadra_preferita,
-        squadra_crest: user.squadra_crest,
-        role: user.role ?? 'user',
-        created_at: user.created_at
-      }
-    });
+    otpStore.set(user.email, { code: otp, expires, userId: user.id, token: tempToken, userData: { id: user.id, email: user.email, username: user.username, nome: user.nome, cognome: user.cognome, squadra_preferita: user.squadra_preferita, squadra_crest: user.squadra_crest, role: user.role ?? 'user', created_at: user.created_at } });
 
     // Manda email OTP
     try {
@@ -182,7 +166,7 @@ app.get('/api/auth/me', authMiddleware, async (req, res) => {
   try {
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, email, username, nome, cognome, squadra_preferita, squadra_crest, role, created_at')
+      .select('id, email, username, nome, cognome, squadra_preferita, squadra_crest, created_at')
       .eq('id', req.user.id)
       .single();
 
@@ -388,6 +372,78 @@ app.delete('/api/admin/users/:id', adminMiddleware, async (req, res) => {
   res.json({ success: true });
 });
 
+// ── PROXY API-FOOTBALL ────────────────────────────────────────────
+app.get('/api/match/:fixtureId', async (req, res) => {
+  try {
+    const { fixtureId } = req.params;
+    const [fixtureRes, eventsRes, lineupsRes] = await Promise.all([
+      fetch(`https://v3.football.api-sports.io/fixtures?id=${fixtureId}`, {
+        headers: { 'x-apisports-key': process.env.API_FOOTBALL_KEY }
+      }),
+      fetch(`https://v3.football.api-sports.io/fixtures/events?fixture=${fixtureId}`, {
+        headers: { 'x-apisports-key': process.env.API_FOOTBALL_KEY }
+      }),
+      fetch(`https://v3.football.api-sports.io/fixtures/lineups?fixture=${fixtureId}`, {
+        headers: { 'x-apisports-key': process.env.API_FOOTBALL_KEY }
+      })
+    ]);
+
+    const [fixture, events, lineups] = await Promise.all([
+      fixtureRes.json(),
+      eventsRes.json(),
+      lineupsRes.json()
+    ]);
+
+    res.json({
+      fixture: fixture.response?.[0] ?? null,
+      events: events.response ?? [],
+      lineups: lineups.response ?? []
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Errore server' });
+  }
+});
+
+// ── SEARCH FIXTURE BY TEAMS ───────────────────────────────────────
+app.get('/api/match/search', async (req, res) => {
+  try {
+    const { home, away, date } = req.query;
+    const url = `https://v3.football.api-sports.io/fixtures?date=${date}`;
+    const response = await fetch(url, {
+      headers: { 'x-apisports-key': process.env.API_FOOTBALL_KEY }
+    });
+    const data = await response.json();
+    // Cerca la partita per nome squadra
+    const match = (data.response ?? []).find((f) => {
+      const h = f.teams.home.name.toLowerCase();
+      const a = f.teams.away.name.toLowerCase();
+      return h.includes(home.toLowerCase()) || a.includes(away.toLowerCase());
+    });
+    res.json({ fixture: match ?? null });
+  } catch (err) {
+    res.status(500).json({ error: 'Errore server' });
+  }
+});
+
+// ── PROXY API-FOOTBALL ───────────────────────────────────────────────
+app.get('/api/apisports', async (req, res) => {
+  try {
+    const path = req.query.path;
+    if (!path) return res.status(400).json({ error: 'path mancante' });
+    const url = new URL(`https://v3.football.api-sports.io/${path}`);
+    Object.entries(req.query).forEach(([k, v]) => {
+      if (k !== 'path') url.searchParams.set(k, v);
+    });
+    const response = await fetch(url.toString(), {
+      headers: { 'x-apisports-key': process.env.APISPORTS_KEY }
+    });
+    if (!response.ok) return res.status(response.status).json({ error: 'Errore API' });
+    const data = await response.json();
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Errore server' });
+  }
+});
 
 // ── HEALTH CHECK ─────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
